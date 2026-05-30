@@ -3,6 +3,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { supabaseAdmin } from '../supabase'
 
 // Función interna para conectar con Supabase respetando las cookies
 async function getSupabaseClient() {
@@ -97,9 +98,39 @@ export async function loginWithCredentials(formData: FormData) {
     .from('users')
     .select('role')
     .eq('id', data.user.id)
-    .single()
+    .maybeSingle()
 
-  const role = userData?.role
+  let role = userData?.role
+
+  if (!userData) {
+    // Si no está en la tabla pública de users, lo creamos dinámicamente desde sus metadatos
+    const metaRole = data.user.user_metadata?.role || 'student'
+    const name = data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'Usuario'
+
+    await supabaseAdmin
+      .from('users')
+      .insert({
+        id: data.user.id,
+        name: name,
+        email: data.user.email,
+        role: metaRole,
+        active: true
+      })
+
+    if (metaRole === 'company') {
+      const nit = data.user.user_metadata?.nit || '900.000.000-0'
+      await supabaseAdmin
+        .from('companies')
+        .insert({
+          user_id: data.user.id,
+          company_name: name,
+          nit: nit,
+          status: 'pending' // Estado por defecto a aprobar
+        })
+    }
+
+    role = metaRole
+  }
 
   // Redirección inteligente según el rol que tenga en la base de datos
   if (role === 'admin') {
